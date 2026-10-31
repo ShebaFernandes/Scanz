@@ -371,3 +371,12 @@ Home now asks what the customer needs: payment help, order help or request track
 The header now has an explicit Customer view / Merchant demo switch. Customer navigation contains only customer home, purchases and request tracking, and its feature directory is limited to customer tools. Merchant navigation has its own overview, checkout request list, orders, approvals, recovery, reports and tests. The merchant checkout desk displays the saved cashier evidence for account-visible checkout cases, with a link back to the same request's customer update. The customer result no longer embeds the cashier copy.
 
 This switch is a presentation aid for the local demonstration, not a separate merchant login or authorization boundary. Merchant mode is disabled for non-operator accounts; existing server-side session, ownership and staff checks remain authoritative. Local demo operators still see only their own/assigned synthetic records. No real merchant terminal, bank connection, payment or notification is added.
+
+
+### Simplified merchant workspace and single-use Sarvam demonstration
+
+The main merchant menu focuses on Payment requests, Missing orders, Approvals and AI investigation. Reports, recovery diagnostics and evaluation tools remain under More merchant tools. The overview explains the three operational tasks.
+
+`AI_DEMO_ENABLED=true`, `AI_ONE_SHOT=true`, `AI_LIVE_ENABLED=true` and `AI_PROVIDER=sarvam` enable a dedicated, explicit-consent live model demo on a newly created synthetic order. Guest sessions remain blocked from ordinary AI endpoints, live Paytm integrations and global settings. The dedicated endpoint atomically consumes one global persistent allowance before queueing the investigation; further requests across all guest sessions are rejected. The model pauses live AI before its first network call. Sarvam is bounded to eight requests with at most 600 output tokens each; this is not a monetary cost guarantee. Errors consume the allowance too, and there is no automatic paid retry. Viewing the page and running tests do not contact Sarvam. The offline checkout hub remains offline. Do not set an overriding AI_LIVE_ENABLED environment variable on server launch: it would override the one-shot pause written to .env.
+
+Guest demo bootstrap remains available when the global AI switch is on: ordinary guest AI creation, retry, enable and clarification routes remain blocked. Only the dedicated explicit-consent single-use synthetic investigation endpoint may call the model. Live Paytm MCP still prevents guest bootstrap.

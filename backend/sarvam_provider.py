@@ -16,12 +16,12 @@ async def run(context, execute_tool, log_usage, *, key, model, system, tools,
     messages=[{'role':'system','content':system},
               {'role':'user','content':json.dumps(context,ensure_ascii=False)}]
     async with httpx.AsyncClient(timeout=35,transport=transport) as client:
-        for _ in range(10):
+        for _ in range(8):
             try:
                 response=await client.post(URL,headers={'api-subscription-key':key},json={
                     'model':model,'messages':messages,'tools':chat_tools(tools),
                     'tool_choice':'required','parallel_tool_calls':False,
-                    'max_tokens':1600,'temperature':0.1,
+                    'max_tokens':600,'temperature':0.1,
                 })
                 response.raise_for_status()
                 data=response.json()

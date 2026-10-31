@@ -557,3 +557,9 @@ purchases.install(app,sys.modules[__name__])
 payment_watch.install(app,sys.modules[__name__])
 
 checkout_hub.install(app,sys.modules[__name__])
+
+try:
+    from . import live_demo
+except ImportError:
+    import live_demo
+live_demo.install(app,sys.modules[__name__])

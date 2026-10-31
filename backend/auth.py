@@ -119,7 +119,7 @@ class SessionMiddleware(BaseHTTPMiddleware):
             except (ValueError,TypeError):pass
         if not isinstance(body,dict):body={}
         if staff_path(path,body) and session['role']!='operator':return JSONResponse({'detail':'Staff access is required.'},403)
-        if session['id'].startswith('GUEST-') and (path.startswith('/api/integrations/') or (path=='/api/rescue/settings' and request.method=='POST') or body.get('agent_mode') in {'ai','openai'} or path.endswith(('/enable-ai','retry-ai'))):
+        if session['id'].startswith('GUEST-') and (path.startswith('/api/integrations/') or (path=='/api/rescue/settings' and request.method=='POST') or body.get('agent_mode') in {'ai','openai'} or path.endswith(('/enable-ai','retry-ai','/reply'))):
             return JSONResponse({'detail':'Guest workspaces support offline mocked operations only.'},403)
         token=principal.set(public(session))
         try:
@@ -144,8 +144,8 @@ def install(app,engine):
     @app.post('/api/auth/demo')
     def demo(request:Request,response:Response):
         if setting('AUTH_DEMO_MODE','false').lower()!='true':raise HTTPException(403,'Guest demo is disabled.')
-        if setting('AI_LIVE_ENABLED','false').lower() in {'true','1','yes'} or setting('PAYTM_MCP_ENABLED','false').lower()=='true':
-            raise HTTPException(503,'Guest workspace requires live AI and Paytm MCP to be disabled.')
+        if setting('PAYTM_MCP_ENABLED','false').lower()=='true':
+            raise HTTPException(503,'Guest workspace requires live Paytm MCP to be disabled.')
         with engine.connection() as db:
             db.execute('BEGIN IMMEDIATE')
             old=db.execute("SELECT u.* FROM auth_sessions s JOIN auth_users u ON u.id=s.user_id WHERE s.token_hash=? AND s.expires>? AND u.id LIKE 'GUEST-%'",(digest(request.cookies.get(COOKIE,'')),time.time())).fetchone()

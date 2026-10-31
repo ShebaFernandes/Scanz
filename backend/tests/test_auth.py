@@ -189,10 +189,14 @@ def test_no_signin_guest_demo_is_private_and_offline(clients,monkeypatch):
     assert a.get('/api/integrations/paytm/status').status_code==403
     assert a.post('/api/auth/demo',headers={'Origin':'https://evil.example'}).status_code==403
 
-def test_guest_mode_cannot_open_with_live_integrations(clients,monkeypatch):
+def test_guest_can_open_offline_with_ai_enabled_but_live_paytm_is_blocked(clients,monkeypatch):
     a,_,_=clients;monkeypatch.setenv('AUTH_DEMO_MODE','true');monkeypatch.setenv('AI_LIVE_ENABLED','true')
+    assert a.post('/api/auth/demo').status_code==200
+    a.headers['X-CSRF-Token']=a.cookies.get('resolve_csrf')
+    assert a.post('/api/cases',json={'order_id':'unused','complaint':'Refund','agent_mode':'ai'}).status_code==403
+    monkeypatch.setenv('PAYTM_MCP_ENABLED','true')
     assert a.post('/api/auth/demo').status_code==503
-    monkeypatch.setenv('AI_LIVE_ENABLED','false');monkeypatch.setenv('AUTH_DEMO_MODE','false')
+    monkeypatch.setenv('PAYTM_MCP_ENABLED','false');monkeypatch.setenv('AUTH_DEMO_MODE','false')
     assert a.post('/api/auth/demo').status_code==403
 
 def test_guest_demo_tools_do_not_promote_private_accounts_or_change_global_settings(clients,monkeypatch):
@@ -202,6 +206,36 @@ def test_guest_demo_tools_do_not_promote_private_accounts_or_change_global_setti
     assert a.get('/api/commerce/analytics').status_code==200
     assert a.post('/api/rescue/settings',json={'grace_seconds':2}).status_code==403
     with main.connection() as db:assert db.execute('SELECT role FROM auth_users WHERE id=?',(private['id'],)).fetchone()[0]=='customer'
+
+def test_single_live_demo_requires_consent_and_is_globally_capped(clients,monkeypatch):
+    a,b,_=clients
+    for k,v in {'AUTH_DEMO_MODE':'true','AI_DEMO_ENABLED':'true','AI_ONE_SHOT':'true','AI_LIVE_ENABLED':'true','AI_PROVIDER':'sarvam','SARVAM_API_KEY':'test-not-real'}.items():monkeypatch.setenv(k,v)
+    for c in (a,b):
+        assert c.post('/api/auth/demo').status_code==200
+        c.headers['X-CSRF-Token']=c.cookies.get('resolve_csrf')
+    assert a.get('/api/ai-demo/status').json()['available']
+    assert a.post('/api/ai-demo/investigate',json={'complaint':'Check payment only','consent':False}).status_code==422
+    assert a.get('/api/ai-demo/status').json()['available']
+    r=a.post('/api/ai-demo/investigate',json={'complaint':'Just check status. Do not refund.','consent':True})
+    assert r.status_code==200,r.text
+    cid=r.json()['id']
+    assert r.json()['state']=='AI_QUEUED'
+    assert b.get('/api/cases/'+cid).status_code==404
+    assert b.get('/api/ai-demo/status').json()['case_id'] is None
+    for c in (a,b):
+        assert c.post('/api/ai-demo/investigate',json={'complaint':'Another complaint','consent':True}).status_code==409
+    assert a.get('/api/ai-demo/status').json()['case_id']==cid
+    assert a.get('/api/integrations/paytm/status').status_code==403
+    assert a.post('/api/cases/'+cid+'/retry-ai').status_code==403
+    assert a.post('/api/cases/'+cid+'/reply',json={'message':'Please continue'}).status_code==403
+
+def test_live_demo_cannot_spend_while_paused_or_without_merchant_access(clients,monkeypatch):
+    a,_,_=clients;register(a)
+    assert a.post('/api/ai-demo/investigate',json={'complaint':'Refund','consent':True}).status_code==403
+    with main.connection() as db:db.execute("UPDATE auth_users SET role='operator'")
+    monkeypatch.setenv('AI_DEMO_ENABLED','true');monkeypatch.setenv('AI_ONE_SHOT','true');monkeypatch.setenv('AI_LIVE_ENABLED','false')
+    assert a.post('/api/ai-demo/investigate',json={'complaint':'Refund','consent':True}).status_code==503
+    assert not a.get('/api/ai-demo/status').json()['used']
 
 
 def test_deployed_frontend_origin_survives_proxy_metadata_and_dashboard_formatting(clients,monkeypatch):
