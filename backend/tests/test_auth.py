@@ -202,3 +202,24 @@ def test_guest_demo_tools_do_not_promote_private_accounts_or_change_global_setti
     assert a.get('/api/commerce/analytics').status_code==200
     assert a.post('/api/rescue/settings',json={'grace_seconds':2}).status_code==403
     with main.connection() as db:assert db.execute('SELECT role FROM auth_users WHERE id=?',(private['id'],)).fetchone()[0]=='customer'
+
+
+def test_deployed_frontend_origin_survives_proxy_metadata_and_dashboard_formatting(clients,monkeypatch):
+    a,_,_=clients
+    monkeypatch.setenv('AUTH_ALLOWED_ORIGINS',' https://scanz-one.vercel.app/ , http://localhost:3000 ')
+    headers={'Origin':'https://scanz-one.vercel.app','Sec-Fetch-Site':'cross-site'}
+    r=a.post('/api/auth/register',json={'email':'deployment@example.test','password':'Deployment-test-password','name':'Demo'},headers=headers)
+    assert r.status_code==200,r.text
+    a.headers['X-CSRF-Token']=a.cookies.get('resolve_csrf')
+    assert a.post('/api/demo-orders',json={'last4':'4821'},headers=headers).status_code==200
+    a.headers.pop('X-CSRF-Token')
+    assert a.post('/api/demo-orders',json={'last4':'4821'},headers=headers).status_code==403
+
+@pytest.mark.parametrize('origin',['https://scanz-one.vercel.app.attacker.test','https://attacker.test','null','https://scanz-one.vercel.app@attacker.test','https://scanz-one.vercel.app/path'])
+def test_origin_fix_does_not_trust_spoofed_hosts(clients,monkeypatch,origin):
+    a,_,_=clients;monkeypatch.setenv('AUTH_ALLOWED_ORIGINS','https://scanz-one.vercel.app/')
+    headers={'Origin':origin,'X-Forwarded-Host':'scanz-one.vercel.app','X-Forwarded-Proto':'https'}
+    assert a.post('/api/auth/login',json={'email':'test@example.test','password':'wrong'},headers=headers).status_code==403
+
+def test_cross_site_request_without_origin_is_still_blocked(clients):
+    assert clients[0].post('/api/auth/login',json={'email':'test@example.test','password':'wrong'},headers={'Sec-Fetch-Site':'cross-site'}).status_code==403

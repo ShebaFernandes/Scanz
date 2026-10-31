@@ -8,6 +8,7 @@ import sqlite3
 import time
 from contextvars import ContextVar
 from pathlib import Path
+from urllib.parse import urlsplit
 from dotenv import dotenv_values
 from fastapi import HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
@@ -53,13 +54,36 @@ def limited(db,key,limit,seconds=900):
     db.execute('INSERT INTO auth_attempts VALUES (?,?,?) ON CONFLICT(bucket) DO UPDATE SET count=CASE WHEN reset<=? THEN 1 ELSE count+1 END,reset=CASE WHEN reset<=? THEN ? ELSE reset END',(bucket,1,now+seconds,now,now,now+seconds))
     return db.execute('SELECT count FROM auth_attempts WHERE bucket=?',(bucket,)).fetchone()[0]>limit
 
+def normalized_origin(value):
+    """Compare exact web origins, allowing harmless dashboard formatting."""
+    try:
+        parsed=urlsplit(value.strip())
+        if parsed.scheme.lower() not in {'http','https'} or not parsed.hostname:
+            return None
+        if parsed.username is not None or parsed.password is not None or parsed.path not in {'','/'} or parsed.query or parsed.fragment:
+            return None
+        scheme=parsed.scheme.lower();port=parsed.port
+        host=parsed.hostname.lower()
+        if ':' in host:host='['+host+']'
+        suffix='' if port is None or (scheme,port) in {('https',443),('http',80)} else ':'+str(port)
+        return scheme+'://'+host+suffix
+    except (ValueError,AttributeError):
+        return None
+
 def origin_allowed(request):
     origin=request.headers.get('origin')
-    if request.headers.get('sec-fetch-site')=='cross-site':return False
-    allowed=set(setting('AUTH_ALLOWED_ORIGINS','http://localhost:3000,http://127.0.0.1:3000').split(','))
-    # Direct backend clients are supported; never trust forwarded host/origin headers.
-    allowed.add(str(request.base_url).rstrip('/'))
-    return origin is None or origin.rstrip('/') in allowed
+    configured=setting('AUTH_ALLOWED_ORIGINS','http://localhost:3000,http://127.0.0.1:3000')
+    allowed={normalized_origin(value) for value in configured.split(',')}
+    # Never trust forwarded host/origin headers to expand this allowlist.
+    allowed.add(normalized_origin(str(request.base_url)))
+    allowed.discard(None)
+    if origin is not None:
+        # Explicit configured origins are authoritative, including when a proxy
+        # forwards a cross-site Fetch Metadata header. CSRF checks still apply.
+        normalized=normalized_origin(origin)
+        return normalized is not None and normalized in allowed
+    # Non-browser API clients may omit Origin; cross-site browser writes may not.
+    return request.headers.get('sec-fetch-site','').lower()!='cross-site'
 
 class Credentials(BaseModel):
     model_config=ConfigDict(extra='forbid')
