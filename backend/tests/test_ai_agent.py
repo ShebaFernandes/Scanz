@@ -8,6 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 import main
+from conftest import authenticated_client
 import ai_agent
 
 async def idle_worker():
@@ -23,7 +24,7 @@ def client(tmp_path,monkeypatch,request):
     monkeypatch.setenv('OPENAI_API_KEY','test-key-not-real')
     monkeypatch.setenv('RESOLVE_AGENT_MODE','openai')
     monkeypatch.setattr(ai_agent,'configured',lambda:True)
-    with TestClient(main.app) as c: yield c
+    with authenticated_client(main) as c: yield c
 
 READS=['get_order','get_payment_status','get_existing_refunds','evaluate_refund_policy']
 REAL_RUN=ai_agent.run_agent
@@ -193,3 +194,21 @@ def test_one_shot_pauses_after_one_investigation(tmp_path,monkeypatch):
     with pytest.raises(ai_agent.AgentUnavailable,match='paused'):
         asyncio.run(REAL_RUN({},noop,noop))
     assert len(calls)==1
+
+def test_model_can_request_restore_through_new_scoped_tools(client,monkeypatch):
+    import time
+    model_script(monkeypatch,['get_checkout','get_inventory','request_order_restore'],recommendation='restore_order',intent='Restore the saved checkout')
+    co=client.post('/api/rescue/demo',json={'scenario':'restore'}).json()['checkout_id']
+    with main.connection() as db:
+        db.execute('UPDATE rescue_payments SET paid_at=0')
+        main.advance_db(db,now=time.time(),step=0)
+        cid=db.execute('SELECT case_id FROM rescue_links WHERE checkout_id=?',(co,)).fetchone()['case_id']
+        db.execute("UPDATE cases SET state='AI_RUNNING',agent_mode='ai',due=? WHERE id=?",(99999999999,cid))
+    asyncio.run(main.investigate(cid))
+    result=get(client,cid)
+    assert result['brief']['recommendation']=='restore_order'
+    assert [t['name'] for t in result['tools']]==['get_checkout','get_inventory','request_order_restore']
+    for _ in range(12):main.advance_once()
+    result=get(client,cid)
+    assert result['state']=='ORDER_RESTORED'
+    assert result['refund'] is None

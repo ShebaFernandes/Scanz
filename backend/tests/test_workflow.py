@@ -1,4 +1,6 @@
+from conftest import authenticated_client
 import sys
+import asyncio
 from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
@@ -7,11 +9,14 @@ import main
 
 @pytest.fixture
 def client(tmp_path, monkeypatch):
+    async def idle_worker():
+        await asyncio.Event().wait()
+    monkeypatch.setattr(main,'worker',idle_worker)
     monkeypatch.setenv('RESOLVE_AGENT_MODE','deterministic')
     monkeypatch.setattr(main,'DB',tmp_path/'test.sqlite3')
     monkeypatch.setattr(main,'STEPS_SECONDS',0)
     main.initialize()
-    with TestClient(main.app) as client:
+    with authenticated_client(main) as client:
         yield client
 
 def create(client,order='ORD-1042'):
@@ -51,7 +56,7 @@ def test_approval_resumes_workflow(client):
 def test_ineligible_orders_never_refund(client,order):
     c=create(client,order)
     result=finish(client,c['id'])
-    assert result['state']=='NEEDS_HUMAN'
+    assert result['state']==('WAITING_PAYMENT' if order=='ORD-1044' else 'NEEDS_HUMAN')
     assert result['refund'] is None
     assert client.post('/api/cases/'+c['id']+'/review',json={'decision':'approve'}).status_code==409
 

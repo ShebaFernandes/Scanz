@@ -11,3 +11,10 @@ frontend/public/opencv.js
 *.tsbuildinfo
 .env.*
 !.env.example
+android-tap/.gradle/
+android-tap/**/build/
+android-tap/local.properties
+frontend/public/ocr/worker.min.js
+frontend/public/ocr/worker.LICENSE.txt
+frontend/public/ocr/tesseract-core*
+frontend/public/ocr/LICENSE
